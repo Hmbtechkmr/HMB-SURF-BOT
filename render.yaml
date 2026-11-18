@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: hmb-surf-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && python download_voices.py
+    startCommand: python main.py
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
