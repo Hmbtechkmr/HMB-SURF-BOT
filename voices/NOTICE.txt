@@ -1,1 +1,14 @@
+PIPER VOICE MODEL ATTRIBUTION
 
+French voice model: fr_FR-upmc-medium
+Repository: rhasspy/piper-voices
+Dataset/model card: https://huggingface.co/rhasspy/piper-voices/tree/v1.0.0/fr/fr_FR/upmc/medium
+License stated in model card: CC BY-SA 4.0
+Selected speaker: Pierre (speaker ID 1)
+
+English voice model: en_US-lessac-medium
+Repository: rhasspy/piper-voices
+Dataset/model card: https://huggingface.co/rhasspy/piper-voices/tree/v1.0.0/en/en_US/lessac/medium
+Review the dataset license linked from its MODEL_CARD before commercial use.
+
+These model files are downloaded at build time; they are not embedded in this source archive.
