@@ -2,6 +2,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+
 class Database:
     def __init__(self, path):
         self.path = path
@@ -24,13 +25,18 @@ class Database:
                 role TEXT NOT NULL, content TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )""")
+            con.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)")
+            con.execute("CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(user_id, id)")
 
     @contextmanager
     def connect(self):
+        # Une connexion par appel : sûr avec les traitements concurrents.
         con = sqlite3.connect(self.path, timeout=30)
         con.row_factory = sqlite3.Row
         try:
             con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA busy_timeout=30000")
+            con.execute("PRAGMA synchronous=NORMAL")
             yield con
             con.commit()
         finally:
