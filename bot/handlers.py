@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from pathlib import Path
 from telegram import Update
 from telegram.constants import ParseMode
@@ -279,9 +278,12 @@ async def _answer_ai(update, context, text):
     history = [dict(x) for x in rows]
     await asyncio.to_thread(db.add_message, user.id, "user", text)
     try:
-        answer = await generate_reply(settings.gemini_api_key, settings.gemini_model, history, text)
+        answer = await generate_reply(
+            settings.gemini_api_key, settings.gemini_model, history, text,
+            groq_api_key=settings.groq_api_key, groq_model=settings.groq_chat_model,
+        )
     except Exception:
-        log.exception("Erreur Gemini")
+        log.exception("Erreur IA")
         answer = "Je rencontre un problème technique avec l'assistant IA. Réessaie plus tard ou utilise Assistance."
     await asyncio.to_thread(db.add_message, user.id, "assistant", answer)
     await update.message.reply_text(answer)
