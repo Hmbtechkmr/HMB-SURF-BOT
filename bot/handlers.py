@@ -1,5 +1,5 @@
-import logging
 import asyncio
+import logging
 import os
 from pathlib import Path
 from telegram import Update
@@ -14,12 +14,18 @@ from .voice import transcribe_groq, synthesize_piper
 
 log = logging.getLogger(__name__)
 
+
 def is_admin(update, context):
     return bool(update.effective_user and update.effective_user.id == context.application.bot_data["admin_id"])
 
+
+def db_of(context):
+    return context.application.bot_data["db"]
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    db = context.application.bot_data["db"]
-    db.register_customer(update.effective_user)
+    db = db_of(context)
+    await asyncio.to_thread(db.register_customer, update.effective_user)
     context.user_data.pop("selected_offer", None)
     context.user_data.pop("active_order_id", None)
     await update.message.reply_text(
@@ -29,6 +35,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.MARKDOWN, reply_markup=main_keyboard()
     )
 
+
 async def help_command(update, context):
     await update.message.reply_text(
         "• /start — Menu principal\n• /cancel — Annuler la commande en cours\n"
@@ -36,16 +43,35 @@ async def help_command(update, context):
         "Pour une vérification de paiement ou une assistance humaine, choisis Assistance."
     )
 
+
 async def cancel(update, context):
     context.user_data.pop("selected_offer", None)
     context.user_data.pop("active_order_id", None)
     await update.message.reply_text("Commande annulée.", reply_markup=main_keyboard())
 
+
+async def setwebhook(update, context):
+    """/setwebhook — repose le webhook Telegram sans redéployer."""
+    if not is_admin(update, context):
+        await update.message.reply_text("Accès réservé à l'administrateur.")
+        return
+    try:
+        await context.application.bot_data["set_webhook"]()
+        info = await context.bot.get_webhook_info()
+        await update.message.reply_text(
+            f"Webhook reposé.\nURL : {info.url}\nPending : {info.pending_update_count}\n"
+            f"Erreur : {info.last_error_message or 'aucune'}"
+        )
+    except Exception as exc:
+        log.exception("Échec de la repose du webhook")
+        await update.message.reply_text(f"Échec : {exc}")
+
+
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     data = q.data or ""
-    db = context.application.bot_data["db"]
+    db = db_of(context)
     if data == "home":
         await q.edit_message_text("Menu principal — HMB SURF BOT", reply_markup=main_keyboard())
     elif data == "catalog":
@@ -89,11 +115,11 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         operator, offer = selected
         user = update.effective_user
-        order_id = db.create_order((
+        order_id = await asyncio.to_thread(db.create_order, (
             user.id, user.username, user.full_name, operator, offer["code"],
             f"{offer['details']} — {offer['validity']}", offer["price"]
         ))
-        db.set_payment_method(order_id, method["label"])
+        await asyncio.to_thread(db.set_payment_method, order_id, method["label"])
         context.user_data["active_order_id"] = order_id
         await q.edit_message_text(
             f"💳 *Paiement de la commande #{order_id}*\n\n"
@@ -108,13 +134,14 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("active_order_id", None)
         await q.edit_message_text("Commande annulée.", reply_markup=main_keyboard())
 
+
 async def payment_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order_id = context.user_data.get("active_order_id")
     if not order_id:
         await update.message.reply_text("Commence par /start, choisis une offre et un moyen de paiement.")
         return
-    db = context.application.bot_data["db"]
-    order = db.get_order(order_id)
+    db = db_of(context)
+    order = await asyncio.to_thread(db.get_order, order_id)
     if not order or order["status"] != "awaiting_proof":
         await update.message.reply_text("Cette commande n'attend plus de preuve. Contacte l'assistance.")
         return
@@ -131,13 +158,14 @@ async def payment_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caption=caption,
         reply_markup=admin_keyboard(order_id)
     )
-    db.set_status(order_id, "pending", expected="awaiting_proof")
+    await asyncio.to_thread(db.set_status, order_id, "pending", "awaiting_proof")
     await update.message.reply_text(
         f"✅ Preuve envoyée à l'administrateur. Commande #{order_id}. "
         "Attends la vérification du paiement."
     )
     context.user_data.pop("active_order_id", None)
     context.user_data.pop("selected_offer", None)
+
 
 async def admin_decision(update, context):
     q = update.callback_query
@@ -146,13 +174,13 @@ async def admin_decision(update, context):
         return
     _, action, raw_id = q.data.split(":")
     order_id = int(raw_id)
-    db = context.application.bot_data["db"]
-    order = db.get_order(order_id)
+    db = db_of(context)
+    order = await asyncio.to_thread(db.get_order, order_id)
     if not order:
         await q.answer("Commande introuvable.", show_alert=True)
         return
     target = "approved" if action == "approve" else "rejected"
-    if not db.set_status(order_id, target, expected="pending"):
+    if not await asyncio.to_thread(db.set_status, order_id, target, "pending"):
         await q.answer("Commande déjà traitée.", show_alert=True)
         return
     await q.answer("Décision enregistrée.")
@@ -165,6 +193,7 @@ async def admin_decision(update, context):
             f"❌ Paiement non validé pour la commande #{order_id}. Contacte l'assistance.")
         await q.edit_message_caption(caption=f"❌ Commande #{order_id} refusée.")
 
+
 async def deliver(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Commande réservée à l'administrateur.")
@@ -172,15 +201,16 @@ async def deliver(update, context):
     if not context.args or not context.args[0].isdigit():
         await update.message.reply_text("Utilisation : /deliver ID_COMMANDE")
         return
-    db = context.application.bot_data["db"]
+    db = db_of(context)
     order_id = int(context.args[0])
-    order = db.get_order(order_id)
+    order = await asyncio.to_thread(db.get_order, order_id)
     if not order or order["status"] != "approved":
         await update.message.reply_text("Commande introuvable ou paiement non validé.")
         return
-    db.set_status(order_id, "delivered", expected="approved")
+    await asyncio.to_thread(db.set_status, order_id, "delivered", "approved")
     await context.bot.send_message(order["user_id"], f"📦 Commande #{order_id} marquée comme livrée. Merci.")
     await update.message.reply_text(f"Commande #{order_id} marquée comme livrée.")
+
 
 async def admin(update, context):
     if not is_admin(update, context):
@@ -188,25 +218,28 @@ async def admin(update, context):
         return
     await update.message.reply_text(
         "👑 Administration HMB\n/stats — statistiques\n/orders — dernières commandes\n"
-        "/deliver ID — marquer livrée\n/broadcast texte — message à tous les clients"
+        "/deliver ID — marquer livrée\n/broadcast texte — message à tous les clients\n"
+        "/setwebhook — réparer la réception Telegram"
     )
+
 
 async def stats(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Accès réservé à l'administrateur.")
         return
-    s = context.application.bot_data["db"].stats()
+    s = await asyncio.to_thread(db_of(context).stats)
     await update.message.reply_text(
         f"📊 STATISTIQUES\nClients : {s['customers']}\nCommandes : {s['orders']}\n"
         f"En attente : {s['pending']}\nValidées/livrées : {s['approved']}\n"
         f"Montant validé : {s['revenue']} FCFA"
     )
 
+
 async def orders(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Accès réservé à l'administrateur.")
         return
-    rows = context.application.bot_data["db"].recent_orders(10)
+    rows = await asyncio.to_thread(db_of(context).recent_orders, 10)
     if not rows:
         await update.message.reply_text("Aucune commande.")
         return
@@ -214,6 +247,7 @@ async def orders(update, context):
     for o in rows:
         lines.append(f"#{o['id']} | {o['operator']} | {o['amount']} F | {o['status']} | ID {o['user_id']}")
     await update.message.reply_text("\n".join(lines))
+
 
 async def broadcast(update, context):
     if not is_admin(update, context):
@@ -223,7 +257,7 @@ async def broadcast(update, context):
     if not message:
         await update.message.reply_text("Utilisation : /broadcast Votre message")
         return
-    ids = context.application.bot_data["db"].customer_ids()
+    ids = await asyncio.to_thread(db_of(context).customer_ids)
     sent = 0
     for user_id in ids:
         try:
@@ -231,23 +265,28 @@ async def broadcast(update, context):
             sent += 1
         except Exception:
             log.warning("Broadcast impossible pour user_id=%s", user_id)
+        # Respecte la limite d'envoi Telegram.
+        await asyncio.sleep(0.05)
     await update.message.reply_text(f"Message envoyé à {sent}/{len(ids)} clients.")
+
 
 async def _answer_ai(update, context, text):
     settings = context.application.bot_data["settings"]
-    db = context.application.bot_data["db"]
+    db = db_of(context)
     user = update.effective_user
-    db.register_customer(user)
-    history = [dict(x) for x in db.history(user.id)]
-    db.add_message(user.id, "user", text)
+    await asyncio.to_thread(db.register_customer, user)
+    rows = await asyncio.to_thread(db.history, user.id)
+    history = [dict(x) for x in rows]
+    await asyncio.to_thread(db.add_message, user.id, "user", text)
     try:
         answer = await generate_reply(settings.gemini_api_key, settings.gemini_model, history, text)
     except Exception:
         log.exception("Erreur Gemini")
         answer = "Je rencontre un problème technique avec l'assistant IA. Réessaie plus tard ou utilise Assistance."
-    db.add_message(user.id, "assistant", answer)
+    await asyncio.to_thread(db.add_message, user.id, "assistant", answer)
     await update.message.reply_text(answer)
     return answer
+
 
 async def text_message(update, context):
     if context.user_data.get("support_mode"):
@@ -264,6 +303,7 @@ async def text_message(update, context):
         await update.message.reply_text("HMB AI est momentanément indisponible. Utilise Assistance.")
         return
     await _answer_ai(update, context, update.message.text)
+
 
 async def voice_message(update, context):
     settings = context.application.bot_data["settings"]
@@ -290,8 +330,7 @@ async def voice_message(update, context):
         answer = await _answer_ai(update, context, transcript)
         if settings.voice_reply_enabled:
             try:
-                # Piper est synchrone : l'exécuter dans un thread évite de bloquer
-                # la boucle asyncio et les autres messages du bot.
+                # Piper est synchrone : exécuté dans un thread pour ne pas bloquer la boucle.
                 local_path = await asyncio.to_thread(
                     synthesize_piper, answer, detected_language, settings
                 )
