@@ -2,10 +2,11 @@ services:
   - type: web
     name: hmb-surf-bot
     runtime: python
-    plan: free
+    plan: free          # passe à starter pour supprimer la mise en veille
     buildCommand: pip install -r requirements.txt && python download_voices.py
     startCommand: python main.py
     healthCheckPath: /health
+    autoDeploy: true
     envVars:
       - key: BOT_TOKEN
         sync: false
@@ -17,3 +18,7 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      - key: KEEPALIVE_ENABLED
+        value: "1"
+      - key: WEBHOOK_WATCHDOG_SECONDS
+        value: "600"
