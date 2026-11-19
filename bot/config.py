@@ -20,6 +20,7 @@ class Settings:
     gemini_model: str
     groq_api_key: str
     groq_stt_model: str
+    groq_chat_model: str
     piper_python: str
     piper_fr_model: str
     piper_fr_config: str
@@ -61,9 +62,11 @@ def load_settings() -> Settings:
         port=port,
         database_path=db_path,
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
-        gemini_model="gemini-2.5-flash",
+        # gemini-2.5-flash n'est plus servi aux nouvelles clés.
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip(),
         groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
         groq_stt_model="whisper-large-v3-turbo",
+        groq_chat_model=os.getenv("GROQ_CHAT_MODEL", "llama-3.3-70b-versatile").strip(),
         piper_python=sys.executable,
         piper_fr_model="voices/fr_FR-upmc-medium.onnx",
         piper_fr_config="voices/fr_FR-upmc-medium.onnx.json",
