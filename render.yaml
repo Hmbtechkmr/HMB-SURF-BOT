@@ -14,14 +14,12 @@ services:
         sync: false
       - key: WEBHOOK_SECRET
         sync: false
-      - key: GEMINI_API_KEY
-        sync: false
       - key: GROQ_API_KEY
         sync: false
-      - key: GEMINI_MODEL
-        value: gemini-3.6-flash
       - key: GROQ_CHAT_MODEL
-        value: llama-3.3-70b-versatile
+        value: openai/gpt-oss-120b
+      - key: GROQ_STT_MODEL
+        value: whisper-large-v3-turbo
       - key: KEEPALIVE_ENABLED
         value: "1"
       - key: WEBHOOK_WATCHDOG_SECONDS

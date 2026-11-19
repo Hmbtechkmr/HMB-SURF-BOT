@@ -188,20 +188,25 @@ async def telegram_status():
 
 @app.get("/ai/status")
 async def ai_status():
-    """Diagnostic IA : quels modèles la clé autorise réellement."""
+    """Diagnostic du moteur Groq et du modèle configuré."""
     result = {
-        "gemini_key_present": bool(settings.gemini_api_key),
+        "provider": "Groq",
         "groq_key_present": bool(settings.groq_api_key),
-        "configured_model": settings.gemini_model,
+        "configured_model": settings.groq_chat_model,
+        "voice_transcription_model": settings.groq_stt_model,
+        "voice_reply": "Piper" if settings.voice_reply_enabled else "disabled",
     }
+    if not settings.groq_api_key:
+        result["groq_ok"] = False
+        result["error"] = "GROQ_API_KEY manquante."
+        return result
     try:
-        models = await list_models(settings.gemini_api_key)
-        result["gemini_ok"] = True
-        result["flash_models_available"] = [
-            m.split("/")[-1] for m in models if "flash" in m
-        ][:20]
+        models = await list_models(settings.groq_api_key)
+        result["groq_ok"] = True
+        result["configured_model_available"] = settings.groq_chat_model in models
+        result["available_models"] = models[:30]
     except Exception as exc:
-        result["gemini_ok"] = False
+        result["groq_ok"] = False
         result["error"] = str(exc)[:300]
     return result
 
