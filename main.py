@@ -8,6 +8,7 @@ from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 )
+from bot.ai import list_models
 from bot.config import settings
 from bot.database import Database
 from bot import handlers
@@ -26,7 +27,7 @@ telegram_app = (
     Application.builder()
     .token(settings.bot_token)
     .updater(None)
-    # True : un appel Gemini lent ne bloque plus les autres utilisateurs.
+    # True : un appel IA lent ne bloque plus les autres utilisateurs.
     # Les accès SQLite sont exécutés dans des threads (voir handlers.py).
     .concurrent_updates(True)
     .build()
@@ -135,7 +136,7 @@ async def lifespan(app: FastAPI):
         await telegram_app.shutdown()
 
 
-app = FastAPI(title="HMB SURF BOT", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="HMB SURF BOT", version="1.2.0", lifespan=lifespan)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -183,6 +184,26 @@ async def telegram_status():
     except Exception:
         log.exception("Échec du diagnostic Telegram.")
         raise HTTPException(status_code=503, detail="Telegram status unavailable")
+
+
+@app.get("/ai/status")
+async def ai_status():
+    """Diagnostic IA : quels modèles la clé autorise réellement."""
+    result = {
+        "gemini_key_present": bool(settings.gemini_api_key),
+        "groq_key_present": bool(settings.groq_api_key),
+        "configured_model": settings.gemini_model,
+    }
+    try:
+        models = await list_models(settings.gemini_api_key)
+        result["gemini_ok"] = True
+        result["flash_models_available"] = [
+            m.split("/")[-1] for m in models if "flash" in m
+        ][:20]
+    except Exception as exc:
+        result["gemini_ok"] = False
+        result["error"] = str(exc)[:300]
+    return result
 
 
 if __name__ == "__main__":
