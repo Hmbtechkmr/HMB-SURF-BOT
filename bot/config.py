@@ -29,6 +29,9 @@ class Settings:
     voice_reply_enabled: bool
     max_voice_seconds: int
     log_level: str
+    webhook_watchdog_seconds: int
+    keepalive_enabled: bool
+    keepalive_seconds: int
 
 
 def load_settings() -> Settings:
@@ -47,7 +50,7 @@ def load_settings() -> Settings:
         raise RuntimeError("Render n'a pas fourni RENDER_EXTERNAL_URL. Vérifie que le service est de type Web Service.")
 
     port = int(os.getenv("PORT", "10000"))
-    db_path = "data/hmb_surf_bot.sqlite3"  # stockage local simple, sans disque Render supplémentaire
+    db_path = "data/hmb_surf_bot.sqlite3"
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
     return Settings(
@@ -70,6 +73,11 @@ def load_settings() -> Settings:
         voice_reply_enabled=True,
         max_voice_seconds=90,
         log_level="INFO",
+        # Intervalle de vérification du webhook (secondes).
+        webhook_watchdog_seconds=int(os.getenv("WEBHOOK_WATCHDOG_SECONDS", "600")),
+        # Auto-ping anti-veille : désactivable avec KEEPALIVE_ENABLED=0 (plan payant).
+        keepalive_enabled=os.getenv("KEEPALIVE_ENABLED", "1").strip() not in ("0", "false", "False"),
+        keepalive_seconds=int(os.getenv("KEEPALIVE_SECONDS", "600")),
     )
 
 
