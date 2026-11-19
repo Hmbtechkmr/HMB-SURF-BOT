@@ -279,8 +279,7 @@ async def _answer_ai(update, context, text):
     await asyncio.to_thread(db.add_message, user.id, "user", text)
     try:
         answer = await generate_reply(
-            settings.gemini_api_key, settings.gemini_model, history, text,
-            groq_api_key=settings.groq_api_key, groq_model=settings.groq_chat_model,
+            settings.groq_api_key, settings.groq_chat_model, history, text,
         )
     except Exception:
         log.exception("Erreur IA")
