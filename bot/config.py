@@ -1,5 +1,6 @@
 import os
 import re
+import secrets
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,11 @@ class Settings:
     webhook_watchdog_seconds: int
     keepalive_enabled: bool
     keepalive_seconds: int
+    diag_token: str
+    order_ttl_minutes: int
+    reminder_minutes: int
+    low_stock_threshold: int
+    tts_cache_dir: str
 
 
 def load_settings() -> Settings:
@@ -45,24 +51,25 @@ def load_settings() -> Settings:
     if not admin.isdigit():
         raise RuntimeError("ADMIN_ID doit être ton identifiant Telegram numérique.")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", secret):
-        raise RuntimeError("WEBHOOK_SECRET manquant ou invalide. Utilise une valeur secrète aléatoire.")
+        raise RuntimeError("WEBHOOK_SECRET manquant ou invalide.")
     if not public_url.startswith("https://"):
-        raise RuntimeError("Render n'a pas fourni RENDER_EXTERNAL_URL. Vérifie que le service est de type Web Service.")
+        raise RuntimeError("RENDER_EXTERNAL_URL absent. Le service doit être un Web Service.")
 
-    port = int(os.getenv("PORT", "10000"))
     db_path = "data/hmb_surf_bot.sqlite3"
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    tts_dir = "data/tts"
+    Path(tts_dir).mkdir(parents=True, exist_ok=True)
 
     return Settings(
         bot_token=token,
         admin_id=int(admin),
         webhook_secret=secret,
         public_url=public_url,
-        port=port,
+        port=int(os.getenv("PORT", "10000")),
         database_path=db_path,
         groq_api_key=groq_api_key,
         groq_stt_model=os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo").strip(),
-        groq_chat_model=os.getenv("GROQ_CHAT_MODEL", "openai/gpt-oss-120b").strip(),
+        groq_chat_model=os.getenv("GROQ_CHAT_MODEL", "openai/gpt-oss-20b").strip(),
         piper_python=sys.executable,
         piper_fr_model="voices/fr_FR-upmc-medium.onnx",
         piper_fr_config="voices/fr_FR-upmc-medium.onnx.json",
@@ -75,6 +82,11 @@ def load_settings() -> Settings:
         webhook_watchdog_seconds=int(os.getenv("WEBHOOK_WATCHDOG_SECONDS", "600")),
         keepalive_enabled=os.getenv("KEEPALIVE_ENABLED", "1").strip().lower() not in ("0", "false", "no"),
         keepalive_seconds=int(os.getenv("KEEPALIVE_SECONDS", "600")),
+        diag_token=os.getenv("DIAG_TOKEN", "").strip() or secrets.token_urlsafe(16),
+        order_ttl_minutes=int(os.getenv("ORDER_TTL_MINUTES", "45")),
+        reminder_minutes=int(os.getenv("REMINDER_MINUTES", "20")),
+        low_stock_threshold=int(os.getenv("LOW_STOCK_THRESHOLD", "3")),
+        tts_cache_dir=tts_dir,
     )
 
 
