@@ -39,22 +39,38 @@ def synthesize_piper(text, language, settings):
     model_path = Path(model)
     config_path = Path(config)
     if not model_path.is_file() or not config_path.is_file():
-        raise FileNotFoundError("Les modèles Piper ne sont pas présents. Vérifie le téléchargement pendant le build Render.")
+        raise FileNotFoundError(
+            "Les modèles Piper ne sont pas présents. Vérifie le téléchargement pendant le build Render."
+        )
 
     output = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     output.close()
+
     command = [
-        sys.executable, "-m", "piper", "-m", str(model_path),
-        "-f", output.name, *speaker_args, "--", text,
+        sys.executable, "-m", "piper",
+        "--model", str(model_path),
+        "--config", str(config_path),
+        "--output_file", output.name,
+        *speaker_args,
     ]
     try:
-        subprocess.run(
+        # Le texte passe par stdin : le CLI Piper ne l'accepte pas après « -- ».
+        completed = subprocess.run(
             command,
-            check=True,
+            input=text,
+            text=True,
+            check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=120,
+            timeout=180,
         )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"Piper a échoué (code {completed.returncode}) : {completed.stderr[-500:]}"
+            )
+        result_path = Path(output.name)
+        if not result_path.is_file() or result_path.stat().st_size == 0:
+            raise RuntimeError("Piper n'a produit aucun fichier audio.")
         return output.name
     except Exception:
         Path(output.name).unlink(missing_ok=True)
