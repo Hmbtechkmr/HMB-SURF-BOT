@@ -60,6 +60,7 @@ telegram_app.add_handler(CommandHandler("orders", handlers.orders))
 telegram_app.add_handler(CommandHandler("deliver", handlers.deliver))
 telegram_app.add_handler(CommandHandler("broadcast", handlers.broadcast))
 telegram_app.add_handler(CommandHandler("setwebhook", handlers.setwebhook))
+telegram_app.add_handler(CommandHandler("voicetest", handlers.voicetest))
 telegram_app.add_handler(CallbackQueryHandler(handlers.admin_decision, pattern=r"^admin:"))
 telegram_app.add_handler(CallbackQueryHandler(handlers.callbacks))
 telegram_app.add_handler(MessageHandler(filters.PHOTO, handlers.payment_photo))
@@ -136,7 +137,7 @@ async def lifespan(app: FastAPI):
         await telegram_app.shutdown()
 
 
-app = FastAPI(title="HMB SURF BOT", version="1.2.0", lifespan=lifespan)
+app = FastAPI(title="HMB SURF BOT", version="1.3.0", lifespan=lifespan)
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -212,5 +213,6 @@ async def ai_status():
 
 
 if __name__ == "__main__":
+    main_import = None
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=settings.port)
