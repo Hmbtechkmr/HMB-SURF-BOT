@@ -1,50 +1,41 @@
-# HMB SURF BOT — version corrigée et simplifiée
+# HMB SURF BOT
 
-Crédit : **HAMZA alliance HMB**
+Bot Telegram de vente de services Orange / Camtel. Crédit : HAMZA alliance HMB.
 
-## Configuration Render : seulement 5 variables
+## Variables Render
 
-Ajoute exactement ces variables dans Render > Environment :
+`BOT_TOKEN`, `ADMIN_ID`, `WEBHOOK_SECRET`, `GROQ_API_KEY`. `RENDER_EXTERNAL_URL` et `PORT` sont fournis par Render.
 
-- `BOT_TOKEN` : token du bot Telegram
-- `ADMIN_ID` : identifiant Telegram numérique de l'administrateur
-- `WEBHOOK_SECRET` : secret aléatoire contenant uniquement lettres, chiffres, `_` ou `-`
-- `GEMINI_API_KEY` : clé Gemini
-- `GROQ_API_KEY` : clé Groq
+Optionnel : `DIAG_TOKEN` (accès aux endpoints de diagnostic), `ORDER_TTL_MINUTES` (45), `REMINDER_MINUTES` (20), `LOW_STOCK_THRESHOLD` (3), `GROQ_CHAT_MODEL` (`openai/gpt-oss-20b`).
 
-L'adresse publique est lue automatiquement depuis `RENDER_EXTERNAL_URL`. Le port est lu depuis `PORT`. Aucune variable `PUBLIC_URL`, `DATABASE_PATH`, `PIPER_*` ou `VOICE_REPLY_ENABLED` à ajouter.
+## Endpoints
 
-## Piper vocal
+- `/health` — readiness (base + Telegram), public
+- `/telegram/status?k=DIAG_TOKEN`
+- `/ai/status?k=DIAG_TOKEN`
 
-Les deux modèles sont téléchargés automatiquement pendant le build Render :
-- Français : Piper UPMC, voix Pierre (speaker 1)
-- Anglais : Piper en_US-lessac-medium
+## Commandes client
 
-Le modèle français UPMC est sous CC BY-SA 4.0 ; le modèle anglais Lessac renvoie aux conditions de licence de son jeu de données. Conserve les notices et vérifie les conditions d'utilisation adaptées à ton activité. Références : https://huggingface.co/rhasspy/piper-voices/tree/v1.0.0/fr/fr_FR/upmc/medium et https://huggingface.co/rhasspy/piper-voices/tree/v1.0.0/en/en_US/lessac/medium.
+`/start`, `/help`, `/cgu`, `/cancel`, `/lang`
 
-## Render
+## Commandes admin
 
-- Runtime : Python 3.11.9 (`.python-version`)
-- Build : `pip install -r requirements.txt && python download_voices.py`
-- Start : `python main.py`
-- Health check : `/health`
+`/admin`, `/stats`, `/orders`, `/stock`, `/client ID`, `/deliver CODE`, `/cancelorder CODE`, `/refund CODE`, `/note CODE texte`, `/addstock CODE`, `/addfaq question | réponse`, `/broadcast texte`, `/backup`, `/diag`, `/setwebhook`, `/voicetest`
 
-Le fichier `render.yaml` contient déjà ces paramètres et les cinq variables.
+`/addstock` : envoie la commande puis colle les codes, un par ligne. À la validation d'un paiement, le code est réservé et envoyé automatiquement. Sans stock, la livraison reste manuelle.
+
+## Comportement
+
+- Commandes non payées expirées après `ORDER_TTL_MINUTES`
+- Relance automatique après `REMINDER_MINUTES`
+- Doublons d'update ignorés, 5 messages / 10 s par utilisateur
+- Réponses longues découpées, texte échappé en HTML
+- Cache FAQ et cache audio Piper
 
 ## Stockage
 
-SQLite reste dans `data/hmb_surf_bot.sqlite3`, sur le stockage local de l'instance. Aucun disque persistant n'est requis. Les données locales peuvent être perdues lors d'un redéploiement ou remplacement de l'instance Render.
+SQLite dans `data/`, **sur disque éphémère** : la base est perdue à chaque redéploiement. Lance `/backup` régulièrement. Migration automatique au démarrage.
 
-## Fonctionnalités
+## Vocal
 
-- Menu, catalogue Orange/Camtel et choix de paiement
-- Réception des preuves de paiement et transmission à l'administrateur
-- Validation/refus manuels et livraison manuelle
-- HMB AI via Gemini
-- Transcription des vocaux via Groq Whisper
-- Réponses vocales Piper en français et en anglais
-- Commandes administrateur : `/admin`, `/stats`, `/orders`, `/deliver ID`, `/broadcast texte`
-
-## Important
-
-Les clés restent privées : ne les ajoute jamais au dépôt GitHub. Les appels Gemini/Groq, le téléchargement des modèles et le déploiement réel doivent être confirmés par les logs Render après le premier déploiement. Les commandes et clients SQLite ne sont pas garantis après redéploiement sans stockage persistant.
+Modèles Piper téléchargés au build (UPMC français, Lessac anglais). `/voicetest` pour vérifier.
