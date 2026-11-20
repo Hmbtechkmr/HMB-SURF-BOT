@@ -66,6 +66,29 @@ async def setwebhook(update, context):
         await update.message.reply_text(f"Échec : {exc}")
 
 
+async def voicetest(update, context):
+    """/voicetest — vérifie la synthèse Piper sans envoyer de vocal."""
+    if not is_admin(update, context):
+        await update.message.reply_text("Accès réservé à l'administrateur.")
+        return
+    settings = context.application.bot_data["settings"]
+    status = await update.message.reply_text("Synthèse en cours…")
+    local_path = None
+    try:
+        local_path = await asyncio.to_thread(
+            synthesize_piper, "Bonjour, la synthèse vocale fonctionne.", "fr", settings
+        )
+        with open(local_path, "rb") as audio:
+            await update.message.reply_voice(voice=audio, caption="Test Piper")
+        await status.delete()
+    except Exception as exc:
+        log.exception("Test Piper échoué")
+        await status.edit_text(f"Échec Piper : {exc}"[:400])
+    finally:
+        if local_path:
+            Path(local_path).unlink(missing_ok=True)
+
+
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -218,7 +241,7 @@ async def admin(update, context):
     await update.message.reply_text(
         "👑 Administration HMB\n/stats — statistiques\n/orders — dernières commandes\n"
         "/deliver ID — marquer livrée\n/broadcast texte — message à tous les clients\n"
-        "/setwebhook — réparer la réception Telegram"
+        "/setwebhook — réparer la réception Telegram\n/voicetest — tester la synthèse vocale"
     )
 
 
