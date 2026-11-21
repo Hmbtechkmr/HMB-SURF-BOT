@@ -12,6 +12,14 @@ def main_keyboard(lang="fr"):
     ])
 
 
+def ai_mode_keyboard(lang="fr"):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(t(lang, "mode_text_btn"), callback_data="mode:text")],
+        [InlineKeyboardButton(t(lang, "mode_voice_btn"), callback_data="mode:voice")],
+        [InlineKeyboardButton(t(lang, "back"), callback_data="home")],
+    ])
+
+
 def operators_keyboard(lang="fr"):
     rows = [[InlineKeyboardButton(CATALOG[key]["label"], callback_data=f"operator:{key}")]
             for key in CATALOG]
