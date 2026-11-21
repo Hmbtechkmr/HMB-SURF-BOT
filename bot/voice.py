@@ -1,4 +1,5 @@
 import hashlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,7 +30,7 @@ def _cache_path(settings, text, lang):
 
 
 def synthesize_piper(text, language, settings):
-    """Retourne (chemin, mis_en_cache)."""
+    """Retourne (chemin_existant, mis_en_cache)."""
     lang = (language or "fr").lower()
     if lang.startswith("en") or "english" in lang:
         model, config, speaker_args, cache_lang = (
@@ -57,7 +58,14 @@ def synthesize_piper(text, language, settings):
             raise RuntimeError(f"Piper code {completed.returncode} : {completed.stderr[-400:]}")
         if Path(output.name).stat().st_size == 0:
             raise RuntimeError("Piper n'a produit aucun audio.")
-        cached.write_bytes(Path(output.name).read_bytes())
-        return output.name, False
-    finally:
+    except Exception:
         Path(output.name).unlink(missing_ok=True)
+        raise
+
+    # Déplace le temporaire vers le cache : le fichier doit exister au retour.
+    try:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(output.name, cached)
+        return str(cached), True
+    except Exception:
+        return output.name, False
