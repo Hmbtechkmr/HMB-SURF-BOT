@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 
 from .catalog import CATALOG, PAYMENT_METHODS
 from .i18n import DEFAULT_LANG, normalize_lang, t
-from .keyboards import (admin_keyboard, confirm_keyboard, main_keyboard,
+from .keyboards import (admin_keyboard, ai_mode_keyboard, confirm_keyboard, main_keyboard,
                         offers_keyboard, operators_keyboard, payment_keyboard)
 from .ai import generate_reply
 from .text import edit_long, esc, send_long
@@ -91,6 +91,7 @@ def guarded(func):
     return wrapper
 
 
+@guarded
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = lang_of(update, context)
     context.user_data["lang"] = lang
@@ -101,18 +102,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_long(update.message, t(lang, "welcome"), main_keyboard(lang))
 
 
+@guarded
 async def help_command(update, context):
-    lang = lang_of(update, context)
     await update.message.reply_text(
         "/start — menu\n/cancel — annuler\n/cgu — conditions\n"
         "Écris un message ou envoie un vocal pour HMB AI.", parse_mode=HTML)
 
 
+@guarded
 async def cgu(update, context):
-    await send_long(update.message, t(lang_of(update, context), "cgu"),
-                    main_keyboard(lang_of(update, context)))
+    lang = lang_of(update, context)
+    await send_long(update.message, t(lang, "cgu"), main_keyboard(lang))
 
 
+@guarded
 async def cancel(update, context):
     lang = lang_of(update, context)
     context.user_data.pop("selected_offer", None)
@@ -120,6 +123,47 @@ async def cancel(update, context):
     await update.message.reply_text(t(lang, "cancelled"), reply_markup=main_keyboard(lang))
 
 
+@guarded
+async def lang_command(update, context):
+    current = lang_of(update, context)
+    new = "en" if current == "fr" else "fr"
+    context.user_data["lang"] = new
+    await asyncio.to_thread(db_of(context).set_lang, update.effective_user.id, new)
+    await update.message.reply_text(t(new, "menu"), reply_markup=main_keyboard(new))
+
+
+async def _reply_mode(update, context):
+    cached = context.user_data.get("reply_mode")
+    if cached:
+        return cached
+    mode = await asyncio.to_thread(db_of(context).get_reply_mode, update.effective_user.id)
+    mode = mode or "text"
+    context.user_data["reply_mode"] = mode
+    return mode
+
+
+async def deliver_answer(update, context, answer, lang, detected=None):
+    """Envoie la réponse selon le mode choisi : vocal ou texte, jamais les deux."""
+    mode = await _reply_mode(update, context)
+    settings = context.application.bot_data["settings"]
+    if mode == "voice" and settings.voice_reply_enabled:
+        try:
+            path, _ = await asyncio.to_thread(synthesize_piper, answer, detected or lang, settings)
+            with open(path, "rb") as audio:
+                try:
+                    await update.message.reply_voice(voice=audio, caption=t(lang, "voice_caption"))
+                except Exception:
+                    log.warning("reply_voice refusé, repli sur sendAudio")
+                    audio.seek(0)
+                    await update.message.reply_audio(audio=audio, title="HMB AI")
+            return
+        except Exception:
+            log.exception("TTS indisponible")
+            await update.message.reply_text(t(lang, "voice_unavailable"))
+    await send_long(update.message, esc(answer))
+
+
+@guarded
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -132,7 +176,17 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "catalog":
         await edit_long(q, t(lang, "choose_operator"), operators_keyboard(lang))
     elif data == "ai":
-        await edit_long(q, t(lang, "ai_ready"))
+        mode = await _reply_mode(update, context)
+        await edit_long(q, t(lang, "ai_mode_prompt", mode=t(lang, f"mode_{mode}")),
+                        ai_mode_keyboard(lang))
+    elif data.startswith("mode:"):
+        mode = data.split(":", 1)[1]
+        if mode not in ("text", "voice"):
+            return
+        context.user_data["reply_mode"] = mode
+        await asyncio.to_thread(db.set_reply_mode, update.effective_user.id, mode)
+        await edit_long(q, t(lang, "mode_voice_set" if mode == "voice" else "mode_text_set"),
+                        main_keyboard(lang))
     elif data in ("support", "human"):
         await edit_long(q, t(lang, "support_intro"))
         context.user_data["support_mode"] = True
@@ -210,8 +264,7 @@ async def _confirmed(update, context, data):
             await edit_long(q, f"Commande {esc(order['code'])} annulée.")
         else:
             await edit_long(q, f"Annulation impossible (statut {order['status']}).")
-
-
+          @guarded
 async def payment_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = lang_of(update, context)
     order_id = context.user_data.get("active_order_id")
@@ -242,7 +295,7 @@ async def payment_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await context.bot.send_photo(
         chat_id=context.application.bot_data["admin_id"],
-        photo=photo.file_id, caption=caption, parse_mode=HTML,
+        photo=photo.file_id, caption=caption[:1024], parse_mode=HTML,
         reply_markup=admin_keyboard(order_id))
     await asyncio.to_thread(db.set_status, order_id, "pending", "awaiting_proof")
     await update.message.reply_text(t(lang, "proof_sent", code=esc(order["code"])),
@@ -251,6 +304,7 @@ async def payment_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("selected_offer", None)
 
 
+@guarded
 async def admin_decision(update, context):
     q = update.callback_query
     if not is_admin(update, context):
@@ -299,6 +353,7 @@ async def admin_decision(update, context):
             caption=f"✅ {esc(order['code'])} validée — aucun stock, livraison manuelle.")
 
 
+@guarded
 async def deliver(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Réservé à l'administrateur.")
@@ -313,16 +368,12 @@ async def deliver(update, context):
         return
     await asyncio.to_thread(db.set_status, order["id"], "delivered", "approved")
     lang = await asyncio.to_thread(db.get_lang, order["user_id"]) or DEFAULT_LANG
-    if order["stock_code"]:
-        await context.bot.send_message(order["user_id"],
-                                       t(lang, "delivered", code=esc(order["code"])), parse_mode=HTML)
-    else:
-        await context.bot.send_message(
-            order["user_id"],
-            f"📦 Commande {esc(order['code'])} livrée. Merci !", parse_mode=HTML)
+    await context.bot.send_message(order["user_id"],
+                                   t(lang, "delivered", code=esc(order["code"])), parse_mode=HTML)
     await update.message.reply_text(f"{order['code']} livrée.")
 
 
+@guarded
 async def cancelorder(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Réservé à l'administrateur.")
@@ -340,6 +391,7 @@ async def cancelorder(update, context):
         reply_markup=confirm_keyboard("cancel", order["id"]))
 
 
+@guarded
 async def refund(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Réservé à l'administrateur.")
@@ -357,6 +409,7 @@ async def refund(update, context):
         reply_markup=confirm_keyboard("refund", order["id"]))
 
 
+@guarded
 async def note(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Réservé à l'administrateur.")
@@ -373,6 +426,7 @@ async def note(update, context):
     await update.message.reply_text(f"Note enregistrée sur {order['code']}.")
 
 
+@guarded
 async def client(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Réservé à l'administrateur.")
@@ -391,6 +445,7 @@ async def client(update, context):
     await update.message.reply_text("\n".join(lines) or "Aucune commande", parse_mode=HTML)
 
 
+@guarded
 async def addstock(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Réservé à l'administrateur.")
@@ -399,6 +454,10 @@ async def addstock(update, context):
         await update.message.reply_text("Utilisation : /addstock CODE_OFFRE puis les codes, un par ligne.")
         return
     offer_code = context.args[0]
+    valid = {o["code"] for item in CATALOG.values() for o in item.get("offers", [])}
+    if offer_code not in valid:
+        await update.message.reply_text(f"Code d'offre inconnu. Exemples : {', '.join(list(valid)[:5])}")
+        return
     body = update.message.text.partition(offer_code)[2]
     codes = [c.strip() for c in body.splitlines() if c.strip()]
     if not codes:
@@ -409,6 +468,7 @@ async def addstock(update, context):
     await update.message.reply_text(f"{added} code(s) ajoutés sur {offer_code}. Stock : {remaining}.")
 
 
+@guarded
 async def stock(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Réservé à l'administrateur.")
@@ -422,6 +482,7 @@ async def stock(update, context):
     await update.message.reply_text("📦 Stock\n" + "\n".join(rows))
 
 
+@guarded
 async def addfaq(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Réservé à l'administrateur.")
@@ -437,6 +498,7 @@ async def addfaq(update, context):
         await update.message.reply_text("Question vide.")
 
 
+@guarded
 async def admin(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Réservé à l'administrateur.")
@@ -448,6 +510,7 @@ async def admin(update, context):
         "/broadcast texte /backup /diag /setwebhook /voicetest")
 
 
+@guarded
 async def stats(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Réservé à l'administrateur.")
@@ -459,6 +522,7 @@ async def stats(update, context):
         f"Montant validé : {s['revenue']} FCFA")
 
 
+@guarded
 async def orders(update, context):
     if not is_admin(update, context):
         await update.message.reply_text("Réservé à l'administrateur.")
@@ -544,23 +608,20 @@ async def voicetest(update, context):
     try:
         path, _ = await asyncio.to_thread(synthesize_piper, "Bonjour, la synthèse fonctionne.", "fr", settings)
         with open(path, "rb") as audio:
-            await update.message.reply_voice(voice=audio, caption="Test Piper")
+            try:
+                await update.message.reply_voice(voice=audio, caption="Test Piper")
+            except Exception:
+                log.warning("reply_voice refusé, repli sur sendAudio")
+                audio.seek(0)
+                await update.message.reply_audio(audio=audio, title="Test Piper")
         await status.delete()
     except Exception as exc:
         log.exception("Test Piper échoué")
         await status.edit_text(f"Échec : {exc}"[:400])
 
 
-@guarded
-async def lang(update, context):
-    current = lang_of(update, context)
-    new = "en" if current == "fr" else "fr"
-    context.user_data["lang"] = new
-    await asyncio.to_thread(db_of(context).set_lang, update.effective_user.id, new)
-    await update.message.reply_text(t(new, "menu"), reply_markup=main_keyboard(new))
-
-
 async def _answer_ai(update, context, text):
+    """Génère la réponse sans l'envoyer : la livraison est décidée par l'appelant."""
     lang = lang_of(update, context)
     settings = context.application.bot_data["settings"]
     db = db_of(context)
@@ -571,7 +632,6 @@ async def _answer_ai(update, context, text):
     cached = await asyncio.to_thread(db.faq_lookup, text)
     if cached:
         await asyncio.to_thread(db.add_message, user.id, "assistant", cached)
-        await send_long(update.message, esc(cached))
         return cached
 
     rows = await asyncio.to_thread(db.history, user.id)
@@ -582,7 +642,6 @@ async def _answer_ai(update, context, text):
         log.exception("Erreur IA")
         answer = t(lang, "error_generic")
     await asyncio.to_thread(db.add_message, user.id, "assistant", answer)
-    await send_long(update.message, esc(answer))
     return answer
 
 
@@ -601,7 +660,8 @@ async def text_message(update, context):
     if not context.application.bot_data["settings"].ai_enabled:
         await update.message.reply_text(t(lang, "ai_down"), reply_markup=main_keyboard(lang))
         return
-    await _answer_ai(update, context, update.message.text)
+    answer = await _answer_ai(update, context, update.message.text)
+    await deliver_answer(update, context, answer, lang)
 
 
 @guarded
@@ -627,15 +687,7 @@ async def voice_message(update, context):
             return
         await status.edit_text(t(lang, "voice_understood", text=esc(transcript)), parse_mode=HTML)
         answer = await _answer_ai(update, context, transcript)
-        if settings.voice_reply_enabled:
-            try:
-                path, _cached = await asyncio.to_thread(
-                    synthesize_piper, answer, detected or lang, settings)
-                with open(path, "rb") as audio:
-                    await update.message.reply_voice(voice=audio, caption=t(lang, "voice_caption"))
-            except Exception:
-                log.exception("Piper indisponible")
-                await update.message.reply_text(t(lang, "voice_unavailable"))
+        await deliver_answer(update, context, answer, lang, detected)
     except Exception:
         log.exception("Erreur vocale")
         await status.edit_text(t(lang, "voice_failed"))
