@@ -47,7 +47,7 @@ telegram_app.bot_data.update({
 for name, func in (
     ("start", handlers.start), ("help", handlers.help_command),
     ("cgu", handlers.cgu), ("cancel", handlers.cancel),
-    ("lang", handlers.lang), ("admin", handlers.admin),
+    ("lang", handlers.lang_command), ("admin", handlers.admin),
     ("stats", handlers.stats), ("orders", handlers.orders),
     ("deliver", handlers.deliver), ("cancelorder", handlers.cancelorder),
     ("refund", handlers.refund), ("note", handlers.note),
@@ -150,6 +150,20 @@ async def reminder_loop():
             log.exception("Boucle relance")
 
 
+async def purge_loop():
+    """Purge les updates vus et les vieilles conversations : la base reste légère."""
+    while True:
+        await asyncio.sleep(86400)
+        try:
+            removed = await asyncio.to_thread(db.purge_seen_updates, 7)
+            old = await asyncio.to_thread(db.purge_conversations, 90)
+            log.info("Purge : %s updates, %s messages.", removed, old)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Boucle purge")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await telegram_app.initialize()
@@ -159,7 +173,8 @@ async def lifespan(app: FastAPI):
 
     tasks = [asyncio.create_task(webhook_watchdog()),
              asyncio.create_task(expiry_loop()),
-             asyncio.create_task(reminder_loop())]
+             asyncio.create_task(reminder_loop()),
+             asyncio.create_task(purge_loop())]
     if settings.keepalive_enabled:
         tasks.append(asyncio.create_task(keepalive_loop()))
     try:
@@ -172,7 +187,7 @@ async def lifespan(app: FastAPI):
         await telegram_app.shutdown()
 
 
-app = FastAPI(title="HMB SURF BOT", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="HMB SURF BOT", version="2.1.0", lifespan=lifespan)
 
 
 def _check(key):
@@ -237,5 +252,6 @@ async def ai_status(k: str = ""):
 
 
 if __name__ == "__main__":
+    main_guard = None
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=settings.port)
