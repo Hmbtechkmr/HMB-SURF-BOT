@@ -33,7 +33,6 @@ STRINGS = {
         "voice_understood": "📝 J'ai compris : {text}",
         "voice_unclear": "Je n'ai pas réussi à comprendre. Réessaie ou écris ton message.",
         "voice_failed": "Impossible de traiter ce vocal. Tu peux écrire ton message.",
-        "voice_caption": "🔊 Réponse vocale HMB AI",
         "voice_unavailable": "La réponse vocale est indisponible ; voici la réponse en texte.",
         "too_fast": "Doucement 🙂 Attends quelques secondes.",
         "timeout": "Traitement trop long, réessaie.",
