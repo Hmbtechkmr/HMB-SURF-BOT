@@ -7,6 +7,19 @@ def esc(value):
     return html.escape(str(value or ""), quote=False)
 
 
+def for_speech(text, limit=200):
+    """Réduit un texte à ce qui sera prononcé : 2 phrases courtes maximum."""
+    text = " ".join((text or "").split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    for sep in (". ", "! ", "? "):
+        idx = cut.rfind(sep)
+        if idx > 60:
+            return cut[:idx + 1]
+    return cut.rsplit(" ", 1)[0] + "…"
+
+
 def chunk(text, limit=MAX_LEN):
     text = text or ""
     if len(text) <= limit:
@@ -46,4 +59,4 @@ async def edit_long(callback_query, text, keyboard=None, parse_mode="HTML"):
         await callback_query.message.reply_text(
             part, parse_mode=parse_mode,
             reply_markup=keyboard if index == len(parts) - 1 else None,
-)
+    )
