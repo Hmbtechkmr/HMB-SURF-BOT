@@ -28,6 +28,8 @@ class Settings:
     ai_enabled: bool
     voice_reply_enabled: bool
     max_voice_seconds: int
+    voice_max_chars: int
+    tts_timeout_seconds: int
     log_level: str
     webhook_watchdog_seconds: int
     keepalive_enabled: bool
@@ -60,6 +62,9 @@ def load_settings() -> Settings:
     tts_dir = "data/tts"
     Path(tts_dir).mkdir(parents=True, exist_ok=True)
 
+    fr_model = os.getenv("PIPER_FR_MODEL", "voices/fr_FR-upmc-medium.onnx").strip()
+    en_model = os.getenv("PIPER_EN_MODEL", "voices/en_US-lessac-medium.onnx").strip()
+
     return Settings(
         bot_token=token,
         admin_id=int(admin),
@@ -71,13 +76,15 @@ def load_settings() -> Settings:
         groq_stt_model=os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo").strip(),
         groq_chat_model=os.getenv("GROQ_CHAT_MODEL", "openai/gpt-oss-20b").strip(),
         piper_python=sys.executable,
-        piper_fr_model="voices/fr_FR-upmc-medium.onnx",
-        piper_fr_config="voices/fr_FR-upmc-medium.onnx.json",
-        piper_en_model="voices/en_US-lessac-medium.onnx",
-        piper_en_config="voices/en_US-lessac-medium.onnx.json",
+        piper_fr_model=fr_model,
+        piper_fr_config=f"{fr_model}.json",
+        piper_en_model=en_model,
+        piper_en_config=f"{en_model}.json",
         ai_enabled=bool(groq_api_key),
         voice_reply_enabled=True,
         max_voice_seconds=90,
+        voice_max_chars=int(os.getenv("VOICE_MAX_CHARS", "200")),
+        tts_timeout_seconds=int(os.getenv("TTS_TIMEOUT_SECONDS", "25")),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         webhook_watchdog_seconds=int(os.getenv("WEBHOOK_WATCHDOG_SECONDS", "600")),
         keepalive_enabled=os.getenv("KEEPALIVE_ENABLED", "1").strip().lower() not in ("0", "false", "no"),
