@@ -12,7 +12,7 @@ from .i18n import DEFAULT_LANG, normalize_lang, t
 from .keyboards import (admin_keyboard, ai_mode_keyboard, confirm_keyboard, main_keyboard,
                         offers_keyboard, operators_keyboard, payment_keyboard)
 from .ai import generate_reply
-from .text import edit_long, esc, send_long
+from .text import edit_long, esc, for_speech, send_long
 from .voice import synthesize_piper, transcribe_groq
 
 log = logging.getLogger(__name__)
@@ -20,8 +20,7 @@ log = logging.getLogger(__name__)
 HTML = ParseMode.HTML
 RATE_LIMIT = 5
 RATE_WINDOW = 10.0
-HANDLER_TIMEOUT = 120.0
-VOICE_HANDLER_TIMEOUT = 300.0
+HANDLER_TIMEOUT = 150.0
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
 
 _rates: dict[int, list[float]] = {}
@@ -83,8 +82,7 @@ def guarded(func):
             return
         async with _lock_for(user.id):
             try:
-                timeout = VOICE_HANDLER_TIMEOUT if func.__name__ in {"text_message", "voice_message", "voicetest"} else HANDLER_TIMEOUT
-                await asyncio.wait_for(func(update, context), timeout=timeout)
+                await asyncio.wait_for(func(update, context), timeout=HANDLER_TIMEOUT)
             except asyncio.TimeoutError:
                 log.warning("Timeout handler %s user=%s", func.__name__, user.id)
                 target = update.callback_query.message if update.callback_query else update.message
@@ -149,14 +147,24 @@ async def deliver_answer(update, context, answer, lang, detected=None):
     mode = await _reply_mode(update, context)
     settings = context.application.bot_data["settings"]
     if mode == "voice" and settings.voice_reply_enabled:
+        speak = for_speech(answer, settings.voice_max_chars)
+        status = await update.message.reply_text(t(lang, "voice_generating"))
         try:
-            started = asyncio.get_running_loop().time()
-            path, cache_hit = await asyncio.to_thread(
-                synthesize_piper, answer, detected or lang, settings
+            path, _ = await asyncio.wait_for(
+                asyncio.to_thread(synthesize_piper, speak, detected or lang, settings),
+                timeout=settings.tts_timeout_seconds,
             )
-            elapsed = asyncio.get_running_loop().time() - started
-            log.info("TTS terminé en %.2fs (cache=%s, caractères=%d)",
-                     elapsed, cache_hit, len(answer))
+        except asyncio.TimeoutError:
+            log.warning("Synthèse vocale trop lente, repli texte")
+            await status.edit_text(t(lang, "voice_slow"))
+            await send_long(update.message, esc(answer))
+            return
+        except Exception:
+            log.exception("TTS indisponible")
+            await status.edit_text(t(lang, "voice_unavailable"))
+            await send_long(update.message, esc(answer))
+            return
+        try:
             with open(path, "rb") as audio:
                 try:
                     await update.message.reply_voice(voice=audio, caption=t(lang, "voice_caption"))
@@ -164,11 +172,13 @@ async def deliver_answer(update, context, answer, lang, detected=None):
                     log.warning("reply_voice refusé, repli sur sendAudio")
                     audio.seek(0)
                     await update.message.reply_audio(audio=audio, title="HMB AI")
-            return
+            await status.delete()
         except Exception:
-            log.exception("TTS indisponible")
-            await update.message.reply_text(t(lang, "voice_unavailable"))
-    await send_long(update.message, esc(answer))
+            log.exception("Envoi vocal impossible")
+            await status.edit_text(t(lang, "voice_unavailable"))
+            await send_long(update.message, esc(answer))
+    else:
+        await send_long(update.message, esc(answer))
 
 
 @guarded
@@ -270,7 +280,7 @@ async def _confirmed(update, context, data):
             await context.bot.send_message(
                 order["user_id"], t(lang, "cancelled"), parse_mode=HTML)
             await edit_long(q, f"Commande {esc(order['code'])} annulée.")
-        else:
+        else
             await edit_long(q, f"Annulation impossible (statut {order['status']}).")@guarded
 async def payment_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = lang_of(update, context)
@@ -641,10 +651,12 @@ async def _answer_ai(update, context, text):
         await asyncio.to_thread(db.add_message, user.id, "assistant", cached)
         return cached
 
+    mode = await _reply_mode(update, context)
+    prompt = text if mode != "voice" else f"{text}\n\n(Réponds en 2 phrases courtes, ton parlé.)"
     rows = await asyncio.to_thread(db.history, user.id)
     history = [dict(x) for x in rows]
     try:
-        answer = await generate_reply(settings.groq_api_key, settings.groq_chat_model, history, text)
+        answer = await generate_reply(settings.groq_api_key, settings.groq_chat_model, history, prompt)
     except Exception:
         log.exception("Erreur IA")
         answer = t(lang, "error_generic")
