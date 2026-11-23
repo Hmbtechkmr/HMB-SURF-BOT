@@ -13,7 +13,6 @@ from bot.ai import list_models
 from bot.config import settings
 from bot.database import Database
 from bot.text import esc
-from bot.voice import warm_piper, clear_voice_cache
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level, logging.INFO),
@@ -152,7 +151,6 @@ async def reminder_loop():
 
 
 async def purge_loop():
-    """Purge les updates vus et les vieilles conversations : la base reste légère."""
     while True:
         await asyncio.sleep(86400)
         try:
@@ -169,14 +167,12 @@ async def purge_loop():
 async def lifespan(app: FastAPI):
     await telegram_app.initialize()
     await telegram_app.start()
-    # Charge la voix française une seule fois au démarrage pour éviter
-    # le coût de chargement du modèle lors de la première réponse vocale.
-    try:
-        await asyncio.to_thread(warm_piper, settings, "fr")
-    except Exception:
-        log.exception("Préchauffage Piper impossible ; le bot continuera normalement.")
     await set_webhook()
     log.info("Webhook configuré. Token diagnostic : %s", settings.diag_token)
+
+    # Préchauffe Piper : le premier vocal utilisateur est plus rapide.
+    asyncio.create_task(asyncio.to_thread(
+        handlers.synthesize_piper, "Bonjour", "fr", settings))
 
     tasks = [asyncio.create_task(webhook_watchdog()),
              asyncio.create_task(expiry_loop()),
@@ -192,10 +188,9 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(*tasks, return_exceptions=True)
         await telegram_app.stop()
         await telegram_app.shutdown()
-        await asyncio.to_thread(clear_voice_cache)
 
 
-app = FastAPI(title="HMB SURF BOT", version="2.1.0", lifespan=lifespan)
+app = FastAPI(title="HMB SURF BOT", version="2.2.0", lifespan=lifespan)
 
 
 def _check(key):
@@ -260,6 +255,5 @@ async def ai_status(k: str = ""):
 
 
 if __name__ == "__main__":
-    main_guard = None
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=settings.port)
