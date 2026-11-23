@@ -280,7 +280,7 @@ async def _confirmed(update, context, data):
             await context.bot.send_message(
                 order["user_id"], t(lang, "cancelled"), parse_mode=HTML)
             await edit_long(q, f"Commande {esc(order['code'])} annulée.")
-else:
+        else:
             await edit_long(q, f"Annulation impossible (statut {order['status']}).")@guarded
 async def payment_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = lang_of(update, context)
